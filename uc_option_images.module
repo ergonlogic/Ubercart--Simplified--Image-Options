@@ -53,6 +53,12 @@ function uc_option_images_form_alter(&$form, &$form_state, $form_id) {
                   '#type' => 'markup',                       
                   '#value' => $preview,
                 );
+               
+               /* from: http://api.drupal.org/api/drupal/modules--upload--upload.module/function/_upload_form/6 */
+                $form['attributes'][$aid]['options'][$oid]['delete-image'] = array(
+                  '#type' => 'checkbox',
+                  //'#title' => t('delete image'),
+                );
                 $form['attributes'][$aid]['options'][$oid][uc_option_images_id($nid, $aid, $oid)] = array(
                   '#type' => 'file',
                   '#title' => t('Image'),
@@ -182,6 +188,10 @@ function uc_option_images_uc_object_options_form($form, &$form_state) {
       if ($oids = element_children($form_state['values']['attributes'][$aid]['options'])) { 
         foreach ($oids as $oid) {
           uc_option_images_save($form_state['values']['id'], $aid, $oid);
+          dd($form_state);
+          if ($form_state['values']['attributes'][$aid]['options'][$oid]['delete-image'] == '1') {
+            uc_option_images_delete($form_state['values']['id'], $aid, $oid);
+          }
         }                                                             
       } 
     } 
@@ -195,7 +205,7 @@ function uc_option_images_uc_object_options_form($form, &$form_state) {
  * Add our image fields to the table.
  */
 function phptemplate_uc_object_options_form($form) {
-  $header = array(t('Attribute'), t('Options'), t('Default'), t('Cost'), t('Price'), t('Weight'), t('Order'), t('Image'), t('Preview'));
+  $header = array(t('Attribute'), t('Options'), t('Default'), t('Cost'), t('Price'), t('Weight'), t('Order'), t('Image'), t('Delete'), t('Preview'));
 
   foreach (element_children($form['attributes']) as $key) {
     $row = array();
@@ -212,11 +222,11 @@ function phptemplate_uc_object_options_form($form) {
         $row[] = drupal_render($form['attributes'][$key]['options'][$oid]['ordering']);
         // MOD: added the image field and preview
         $row[] = drupal_render($form['attributes'][$key]['options'][$oid][uc_option_images_id(arg(1), $key, $oid)]); 
+        $row[] = drupal_render($form['attributes'][$key]['options'][$oid]['delete-image']);
         $row[] = drupal_render($form['attributes'][$key]['options'][$oid]['option_image_preview']);
-  
         if (!$first) {
-          // MOD: changed from -7 to -9 to accomidate the new columns 
-          $row = array_pad($row, -9, '');
+          // MOD: changed from -7 to -10 to accommodate the new columns 
+          $row = array_pad($row, -10, '');
         }
         else {
           $first = FALSE;
@@ -265,10 +275,15 @@ function phptemplate_radio($element) {
   $output .= drupal_attributes($element['#attributes']) . ' />';
 
   // adding uc_option_images
+
   $filepath = uc_option_images_filepath(arg(1), $element['#parents']['1'], $element['#return_value']);
   if (arg(0) == 'node' && is_numeric(arg(1)) && !arg(2) == 'edit' && isset($filepath)) {
     $output .= '<img src="/' . $filepath . '"/>';
   }
+//dsm($element);
+// dsm($element['#parents']['1']);
+//  dsm($element['#return_value'];
+//  dsm($filepath);
   // done
 
   if (!is_null($element['#title'])) {
