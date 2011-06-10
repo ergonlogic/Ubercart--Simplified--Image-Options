@@ -1,0 +1,282 @@
+<?php
+  
+/**
+* @file 
+* Provides image upload fields for attribute options.
+*/
+
+/**
+ * Implementation of hook_perm().
+ */
+function uc_option_images_perm() {
+  return array('view option images', 'administer option images');
+}
+
+/**
+ * Implementation of hook_form_alter();
+ */
+function uc_option_images_form_alter(&$form, &$form_state, $form_id) {
+  switch ($form_id) {
+    // Attribute options form
+    case 'uc_object_options_form': 
+      // Make sure we are a node's options page
+      if (!is_numeric(arg(1)) && arg(0) != 'node'){
+        return;
+      }           
+      // Add option image previews and browse fields
+      if ($aids = element_children($form['attributes'])){  
+        $node = menu_get_object();
+        $nid = $node->nid;
+        $attributes = variable_get('uc_option_images_attributes', '');
+                                       
+        foreach($aids as $aid) { 
+          // Make sure the attribute is switchable
+          if (isset($attributes[$aid]) && !$attributes[$aid]){
+            continue;
+          }
+          
+          // Display fields
+          if ($oids = element_children($form['attributes'][$aid]['options'])){ 
+            foreach($oids as $oid) { 
+              $file = uc_option_images_load($nid, $aid, $oid);
+              
+              if (!empty($file)) {
+                $filepath = uc_option_images_filepath($nid, $aid, $oid);
+                if (isset($filepath)) {
+                  $preview = '<img src="/' . $filepath . '" />';
+                }
+                else {
+                  $preview = 'no image';
+                }
+
+                $form['attributes'][$aid]['options'][$oid]['option_image_preview'] = array(
+                  '#type' => 'markup',                       
+                  '#value' => $preview,
+                );
+                $form['attributes'][$aid]['options'][$oid][uc_option_images_id($nid, $aid, $oid)] = array(
+                  '#type' => 'file',
+                  '#title' => t('Image'),
+                  '#name' => 'files[' . uc_option_images_id($nid, $aid, $oid) . ']',
+                  '#size' => 8,
+                  '#default_value' => $file->filename,       
+                );
+              }
+            }
+          } 
+
+        } 
+        
+        $form['#submit'][] = 'uc_option_images_uc_object_options_form';
+        $form['#attributes'] = array('enctype' => 'multipart/form-data');
+      }
+      break;
+  }
+}
+
+/**
+ * Load image file.
+ * 
+ * @todo: static cache
+ */
+function uc_option_images_load($nid, $aid, $oid) {
+  static $files;
+  $filename = uc_option_images_id($nid, $aid, $oid);
+  if (empty($files[$filename])) {
+    $files[$filename] = db_fetch_object(db_query("SELECT * FROM {files} WHERE filename = '%s'", $filename));
+    if (empty($files[$filename])) {
+      if ($nid) {
+        return uc_option_images_load(0, $aid, $oid);
+      }
+      elseif ($aid && $oid) {
+        return uc_option_images_load(0, 0, 0);
+      }
+    }
+  }
+  return $files[$filename];
+}
+
+/**
+ * Save the uploaded file in the 'option-images' folder and insert 
+ * into the files table.
+ * 
+ * @param int $nid
+ * 
+ * @param int $aid
+ * 
+ * @param int $oid
+ * 
+ * @return mixed
+ *   - Success: File object
+ *   - Failure: FALSE
+ */
+function uc_option_images_save($nid, $aid, $oid) { 
+  global $user;
+  $validators = array(
+    'file_validate_size' => array(2 * 1024 * 1024),
+    'file_validate_is_image' => array(),
+  );
+
+  if ($file = file_save_upload(uc_option_images_id($nid, $aid, $oid),$validators)) {
+    $dest = file_create_path(file_directory_path() . '/option-images');
+    file_check_directory($dest, FILE_CREATE_DIRECTORY);
+    if (file_copy($file->filepath, $dest, FILE_EXISTS_REPLACE)) {
+      $file->filename = uc_option_images_id($nid,$aid,$oid);
+      $file->uid = $user->uid;
+      $file->status = FILE_STATUS_PERMANENT;
+      uc_option_images_delete($nid, $aid, $oid);
+      drupal_write_record('files', $file);
+      
+      return $file;
+    }
+    else {
+      drupal_set_message(t('Failed to save image.'), 'error');
+      
+      return FALSE;
+    }
+  }
+}
+
+/**
+ * Delete an option image.
+ * 
+ * @param int $nid
+ * 
+ * @param int $aid
+ * 
+ * @param int $oid
+ * 
+ * @return mixed
+ *   Results of db_query().
+ */
+function uc_option_images_delete($nid, $aid, $oid) {
+  return db_query("DELETE FROM {files} WHERE filename = '%s'", uc_option_images_id($nid,$aid,$oid));    
+}
+
+/**
+ * Return array of attribute options.
+ */
+function uc_option_images_get_attribute_options() {
+  $output = array();
+  
+  $results = db_query("SELECT aid, name FROM {uc_attributes}");
+  while ($result = db_fetch_array($results)){
+    $output[$result['aid']] = $result['name'];
+  }
+  
+  return $output;
+}
+
+/**
+ * Returns a unique ID corrosponding to the node id, attribute id, and option.
+ */
+function uc_option_images_id($nid, $aid, $oid) {
+  return 'option_image_' . $nid . '_' . $aid . '_' . $oid;
+}
+
+/**
+ * Handle uc_object_options_form submit.
+ */
+function uc_option_images_uc_object_options_form($form, &$form_state) {
+  if ($aids = element_children($form_state['values']['attributes'])) {
+    foreach ($aids as $aid) { 
+      if ($oids = element_children($form_state['values']['attributes'][$aid]['options'])) { 
+        foreach ($oids as $oid) {
+          uc_option_images_save($form_state['values']['id'], $aid, $oid);
+        }                                                             
+      } 
+    } 
+  }    
+}
+
+
+/**
+ * Display the option form. 
+ * 
+ * Add our image fields to the table.
+ */
+function phptemplate_uc_object_options_form($form) {
+  $header = array(t('Attribute'), t('Options'), t('Default'), t('Cost'), t('Price'), t('Weight'), t('Order'), t('Image'), t('Preview'));
+
+  foreach (element_children($form['attributes']) as $key) {
+    $row = array();
+    $row[] = array('data' => drupal_render($form['attributes'][$key]['aid']) . drupal_render($form['attributes'][$key]['name']), 'class' => 'attribute');
+
+    if (element_children($form['attributes'][$key]['default'])) {
+      $first = TRUE;
+      foreach (element_children($form['attributes'][$key]['default']) as $oid) {
+        $row[] = drupal_render($form['attributes'][$key]['options'][$oid]['select']);
+        $row[] = drupal_render($form['attributes'][$key]['default'][$oid]);
+        $row[] = drupal_render($form['attributes'][$key]['options'][$oid]['cost']);
+        $row[] = drupal_render($form['attributes'][$key]['options'][$oid]['price']);
+        $row[] = drupal_render($form['attributes'][$key]['options'][$oid]['weight']);
+        $row[] = drupal_render($form['attributes'][$key]['options'][$oid]['ordering']);
+        // MOD: added the image field and preview
+        $row[] = drupal_render($form['attributes'][$key]['options'][$oid][uc_option_images_id(arg(1), $key, $oid)]); 
+        $row[] = drupal_render($form['attributes'][$key]['options'][$oid]['option_image_preview']);
+  
+        if (!$first) {
+          // MOD: changed from -7 to -9 to accomidate the new columns 
+          $row = array_pad($row, -9, '');
+        }
+        else {
+          $first = FALSE;
+        }
+
+        $rows[] = $row;
+        $row = array();
+      }
+      unset($form['attributes'][$key]['default']);
+    }
+    else {
+      $row[] = array('data' => drupal_render($form['attributes'][$key]['default']), 'colspan' => 7);
+      $rows[] = $row;
+    }
+
+    // MOD: changed colspan from 7 to 9
+    $rows[] = array(array('data' => '<hr />', 'colspan' => 9));
+  }
+
+  if (count($rows) == 0) {
+    $rows[] = array(
+      array('data' => t('This !type does not have any attributes.', array('!type' => $form['type']['#value'] == 'product' ? t('product') : t('product class'))), 'colspan' => 7),
+    );
+  }
+
+  $output = theme('table', $header, $rows, array('class' => 'product_attributes'))
+          . drupal_render($form);
+
+  return $output;
+}
+
+function uc_option_images_filepath($nid, $aid, $oid) {
+  $filename = uc_option_images_id($nid, $aid, $oid);
+  $option_image = db_fetch_object(db_query("SELECT * FROM {files} WHERE filename = '%s'", $filename));
+
+  return $option_image->filepath;
+}
+
+function phptemplate_radio($element) {
+  _form_set_class($element, array('form-radio'));
+  $output = '<input type="radio" ';
+  $output .= 'id="' . $element['#id'] . '" ';
+  $output .= 'name="' . $element['#name'] . '" ';
+  $output .= 'value="' . $element['#return_value'] . '" ';
+  $output .= (check_plain($element['#value']) == $element['#return_value']) ? ' checked="checked" ' : ' ';
+  $output .= drupal_attributes($element['#attributes']) . ' />';
+
+  // adding uc_option_images
+  $filepath = uc_option_images_filepath(arg(1), $element['#parents']['1'], $element['#return_value']);
+  if (arg(0) == 'node' && is_numeric(arg(1)) && !arg(2) == 'edit' && isset($filepath)) {
+    $output .= '<img src="/' . $filepath . '"/>';
+  }
+  // done
+
+  if (!is_null($element['#title'])) {
+    $output = '<label class="option" for="' . $element['#id'] . '">' . $output . ' ' . $element['#title'] . '</label>';
+  }
+
+  unset($element['#title']);
+  return theme('form_element', $element, $output);
+}
+
+

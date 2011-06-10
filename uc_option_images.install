@@ -1,0 +1,35 @@
+<?php
+
+/**
+ * Implementation of hook_install().
+ *   Adds default option image to file system.
+ */
+function uc_option_images_install() {
+  $default_image_path = drupal_get_path('module', 'uc_option_images') . '/no_image.png'; 
+  $default_image_name = 'option_images_0_0_0';
+  $file_path = db_result(db_query("SELECT fid from {files} WHERE filename = '%s' AND filepath = '%s'", $default_image_name, $default_image_path)); 
+  // Make sure image doesn't already exist in the files table.
+  if (!$file_path) {
+    $info = image_get_info($default_image_path);
+    $file = (object) array(
+      'uid' => 1,
+      'filename' => $default_image_name,
+      'filepath' => $default_image_path,
+      'filemime' => $info['file_mime'],
+      'filesize' => $info['file_size'],
+      'status' => FILE_STATUS_PERMANENT
+    );
+    drupal_write_record('files', $file);
+  }
+}
+
+/**
+ * Implementation of hook_uninstall().
+ *   Removes default option image to file system and variables.
+ */
+function uc_option_images_uninstall() {
+  // Remove default option image.
+  $default_image_path = drupal_get_path('module', 'uc_option_images') . '/no_image.png'; 
+  $default_image_name = 'option_images_0_0_0';
+  db_query("DELETE FROM {files} WHERE filename = '%s' AND filepath = '%s'", $default_image_name, $default_image_path);
+}

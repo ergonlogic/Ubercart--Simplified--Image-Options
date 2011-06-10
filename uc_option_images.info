@@ -1,0 +1,7 @@
+
+name = Option Images (Simplified)
+description = Allows users to upload images per attribute option.
+dependencies[] = uc_attribute
+dependencies[] = imagecache
+package = Ubercart - extra
+core = 6.x
